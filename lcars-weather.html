@@ -63,6 +63,7 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 .day .t i{font-style:normal;color:var(--c);font-size:2.8vh}
 .day span{font-size:2vh;color:var(--c)}
 .clock{color:var(--peach)}
+.basemap{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9) saturate(.6)}
 #hint{position:fixed;left:50%;bottom:2vh;transform:translateX(-50%);z-index:5000;background:var(--orange);color:#000;
   font-size:2.6vh;padding:.8vh 2vw;border-radius:3vh;opacity:.92}
 </style>
@@ -222,8 +223,8 @@ function initMap(){
   if(typeof L==="undefined"){$("rtime").textContent="(map unavailable)";return}
   map=L.map("map",{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false})
        .setView([LAT,LON],RADAR_ZOOM);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    {attribution:"&copy; OpenStreetMap, &copy; CARTO | Radar: RainViewer",maxZoom:12}).addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {attribution:"&copy; OpenStreetMap contributors | Radar: RainViewer",maxZoom:12,className:"basemap"}).addTo(map);
   L.circleMarker([LAT,LON],{radius:6,color:"#ff9900",weight:2,fillColor:"#ffcc99",fillOpacity:1}).addTo(map);
   setTimeout(function(){map.invalidateSize()},300);
 }
