@@ -36,7 +36,7 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 .side .m .l,.side .m .c{font-size:2.4vh;display:block}
 .side .m .n{font-size:7vh;font-weight:700;display:block}
 .side .m .n small{font-size:2.6vh;font-weight:400}
-.main{display:grid;gap:.8vh .6vw;grid-template-columns:1fr 2.3fr .8fr;grid-template-rows:1fr 1fr 1fr .85fr;min-height:0}
+.main{display:grid;gap:.8vh .6vw;grid-template-columns:1fr 2.3fr .8fr;grid-template-rows:1fr 1fr 1fr 1fr;min-height:0}
 .panel{background:#111;border-left:1.2vw solid var(--c,var(--orange));border-radius:0 3vh 3vh 0;padding:1.2vh 1.4vw;display:flex;flex-direction:column;justify-content:space-between;min-width:0;min-height:0}
 .panel h2{font-size:2.4vh;font-weight:400;color:var(--c)}
 .panel .v{font-size:9vh;line-height:1;color:var(--peach);font-weight:700}
@@ -54,6 +54,8 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 .hlabel{width:7vw;font-size:2.4vh;color:var(--c);align-self:center;line-height:1.1}
 .hr{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:.3vh}
 .hr .tm{font-size:2vh;color:var(--lilac)}
+.hr .pp{font-size:2.6vh;color:var(--blue);line-height:1;text-align:center;font-weight:700}
+.hr .pp i{display:block;font-style:normal;font-weight:400;font-size:1.7vh;margin-top:.2vh}
 .hr .tp{font-size:3.6vh;color:var(--peach);line-height:1;font-weight:700}
 .hr .br{width:70%;background:var(--blue);border-radius:.6vh .6vh 0 0;min-height:.8vh}
 .fc{grid-column:3;grid-row:1/5;display:flex;flex-direction:column;gap:.8vh}
@@ -124,6 +126,8 @@ var LAT = 45.3833, LON = -73.7500;   // Châteauguay
 var PLACE = "Châteauguay";
 var REFRESH_MIN = 10;
 var RADAR_ZOOM = 8;                  // 7 = wider area, 8 = closer
+var RADAR_FRAME_MS = 1200;           // how long each radar frame shows (1000 = 1 second)
+var RADAR_HOLD_MS = 3000;            // how long the newest frame is held
 var RADAR_FRAMES = 12;               // frames in the loop (Environment Canada: 6 min apart)
 // ======================================================
 
@@ -150,7 +154,7 @@ function tick(){
 function load(){
   var url="https://api.open-meteo.com/v1/forecast?latitude="+LAT+"&longitude="+LON+
   "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,uv_index"+
-  "&hourly=temperature_2m,uv_index&forecast_hours=12"+
+  "&hourly=temperature_2m,uv_index,precipitation_probability,weather_code&forecast_hours=12"+
   "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_probability_max,uv_index_max"+
   "&timezone=auto&forecast_days=7&wind_speed_unit=kmh";
   fetch(url).then(function(r){return r.json()}).then(function(j){
@@ -175,7 +179,10 @@ function load(){
     var t=h.temperature_2m, lo=Math.min.apply(null,t), hi=Math.max.apply(null,t), span=(hi-lo)||1, o="";
     for(var k=0;k<t.length;k++){
       var ht=18+((t[k]-lo)/span)*82;
-      o+='<div class="hr"><div class="tp">'+Math.round(t[k])+'°</div><div class="br" style="height:'+(ht*.45)+'%"></div><div class="tm">'+hm(h.time[k])+'</div></div>';
+      var pp=(h.precipitation_probability&&h.precipitation_probability[k]!=null)?Math.round(h.precipitation_probability[k]):null, pw="";
+      if(pp!==null&&pp>=20) pw=precipType(h.weather_code?h.weather_code[k]:-1,t[k]);
+      o+='<div class="hr"><div class="tp">'+Math.round(t[k])+'°</div><div class="br" style="height:'+(ht*.32)+'%"></div>'+
+         '<div class="pp">'+(pp===null?"--":pp+"%")+'<i>'+(pw||"&nbsp;")+'</i></div><div class="tm">'+hm(h.time[k])+'</div></div>';
     }
     $("hrs").innerHTML=o;
     var f="";
@@ -189,6 +196,12 @@ function load(){
   }).catch(function(){});
 }
 
+function precipType(code,temp){
+  if([71,73,75,77,85,86].indexOf(code)>-1) return "snow";
+  if([56,57,66,67].indexOf(code)>-1) return "ice";
+  if(code>=51) return "rain";
+  return temp<=0?"snow":"rain";
+}
 function uvLevel(u){
   if(u<3)return["Low","var(--blue)"];
   if(u<6)return["Moderate","var(--orange)"];
@@ -236,11 +249,11 @@ function clearRadar(){
 }
 function stepRadar(){
   showFrame((fi+1)%frames.length);
-  radarTimer=setTimeout(stepRadar,(fi===frames.length-1)?3000:1200);
+  radarTimer=setTimeout(stepRadar,(fi===frames.length-1)?RADAR_HOLD_MS:RADAR_FRAME_MS);
 }
 function startRadar(){
   showFrame(0);
-  radarTimer=setTimeout(stepRadar,600);
+  radarTimer=setTimeout(stepRadar,RADAR_FRAME_MS);
 }
 /* Environment Canada (MSC GeoMet): 1 km radar, rain + snow, new image about every 6 minutes */
 function loadGeoMet(){
