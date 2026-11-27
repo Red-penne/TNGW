@@ -123,7 +123,8 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 var LAT = 45.3833, LON = -73.7500;   // Châteauguay
 var PLACE = "Châteauguay";
 var REFRESH_MIN = 10;
-var RADAR_ZOOM = 8;                  // 6 = wider area, 7 = closer
+var RADAR_ZOOM = 8;                  // 7 = wider area, 8 = closer
+var RADAR_FRAMES = 12;               // frames in the loop (Environment Canada: 6 min apart)
 // ======================================================
 
 var CODES = {0:"Clear",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Rime fog",
@@ -224,30 +225,78 @@ function initMap(){
   map=L.map("map",{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false})
        .setView([LAT,LON],RADAR_ZOOM);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {attribution:"&copy; OpenStreetMap contributors | Radar: RainViewer",maxZoom:12,className:"basemap"}).addTo(map);
+    {attribution:"&copy; OpenStreetMap contributors | Radar: Environment Canada / RainViewer",maxZoom:12,className:"basemap"}).addTo(map);
   L.circleMarker([LAT,LON],{radius:6,color:"#ff9900",weight:2,fillColor:"#ffcc99",fillOpacity:1}).addTo(map);
   setTimeout(function(){map.invalidateSize()},300);
 }
-function loadRadar(){
-  if(!map)return;
-  fetch("https://api.rainviewer.com/public/weather-maps.json").then(function(r){return r.json()}).then(function(j){
-    clearInterval(radarTimer);
-    layers.forEach(function(l){map.removeLayer(l)});
-    layers=[]; fi=0;
-    frames=(j.radar.past||[]).concat(j.radar.nowcast||[]);
-    frames.forEach(function(fr){
+function clearRadar(){
+  clearTimeout(radarTimer);
+  layers.forEach(function(l){map.removeLayer(l)});
+  layers=[]; frames=[]; fi=0;
+}
+function stepRadar(){
+  showFrame((fi+1)%frames.length);
+  radarTimer=setTimeout(stepRadar,(fi===frames.length-1)?3000:600);
+}
+function startRadar(){
+  showFrame(0);
+  radarTimer=setTimeout(stepRadar,600);
+}
+/* Environment Canada (MSC GeoMet): 1 km radar, rain + snow, new image about every 6 minutes */
+function loadGeoMet(){
+  var cap="https://geo.weather.gc.ca/geomet?service=WMS&version=1.3.0&request=GetCapabilities&layer=RADAR_1KM_RRAI";
+  return fetch(cap).then(function(r){ if(!r.ok) throw new Error("http"); return r.text(); }).then(function(txt){
+    var xml=new DOMParser().parseFromString(txt,"text/xml");
+    var dims=xml.getElementsByTagName("Dimension"), ext="";
+    for(var i=0;i<dims.length;i++){
+      if(dims[i].getAttribute("name")==="time"){ ext=dims[i].textContent.trim(); break; }
+    }
+    if(!ext) throw new Error("no time");
+    var parts=ext.split(",").pop().split("/");
+    var start=new Date(parts[0]), end=new Date(parts[1]);
+    if(isNaN(start.getTime())||isNaN(end.getTime())) throw new Error("bad time");
+    var m=/PT(\d+)M/.exec(parts[2]||"");
+    var step=(m?parseInt(m[1],10):6)*60000;
+    var list=[];
+    for(var k=RADAR_FRAMES-1;k>=0;k--){
+      var t=new Date(end.getTime()-k*step);
+      if(t>=start) list.push(t);
+    }
+    if(!list.length) throw new Error("no frames");
+    clearRadar();
+    list.forEach(function(t){
+      var iso=t.toISOString().replace(/\.\d+Z$/,"Z");
+      layers.push(L.tileLayer.wms("https://geo.weather.gc.ca/geomet",
+        {layers:"RADAR_1KM_RRAI,RADAR_1KM_RSNO",format:"image/png",transparent:true,version:"1.3.0",time:iso,opacity:0,zIndex:10}).addTo(map));
+      frames.push(t.getTime()/1000);
+    });
+    startRadar();
+  });
+}
+/* RainViewer: worldwide backup if Environment Canada can't be reached */
+function loadRainViewer(){
+  return fetch("https://api.rainviewer.com/public/weather-maps.json").then(function(r){return r.json()}).then(function(j){
+    var all=(j.radar.past||[]).concat(j.radar.nowcast||[]);
+    if(!all.length) throw new Error("no frames");
+    clearRadar();
+    all.forEach(function(fr){
       layers.push(L.tileLayer(j.host+fr.path+"/256/{z}/{x}/{y}/2/1_1.png",
         {opacity:0,maxNativeZoom:7,maxZoom:12,zIndex:10}).addTo(map));
+      frames.push(fr.time);
     });
-    showFrame(0);
-    radarTimer=setInterval(function(){showFrame((fi+1)%frames.length)},700);
-  }).catch(function(){$("rtime").textContent="(radar offline)"});
+    startRadar();
+  });
+}
+function loadRadar(){
+  if(!map)return;
+  loadGeoMet().catch(function(){ return loadRainViewer(); })
+    .catch(function(){ $("rtime").textContent="(radar offline)"; });
 }
 function showFrame(n){
   if(!layers.length)return;
   layers[fi].setOpacity(0); fi=n; layers[fi].setOpacity(.75);
-  var d=new Date(frames[fi].time*1000);
-  $("rtime").textContent=pad(d.getHours())+":"+pad(d.getMinutes());
+  var d=new Date(frames[fi]*1000);
+  $("rtime").textContent=pad(d.getHours())+":"+pad(d.getMinutes())+(fi===frames.length-1?" LATEST":"");
 }
 
 tick(); setInterval(tick,1000);
