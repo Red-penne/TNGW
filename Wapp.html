@@ -236,7 +236,7 @@ function clearRadar(){
 }
 function stepRadar(){
   showFrame((fi+1)%frames.length);
-  radarTimer=setTimeout(stepRadar,(fi===frames.length-1)?3000:600);
+  radarTimer=setTimeout(stepRadar,(fi===frames.length-1)?3000:1200);
 }
 function startRadar(){
   showFrame(0);
