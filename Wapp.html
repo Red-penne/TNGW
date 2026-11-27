@@ -237,26 +237,63 @@ function aqLevel(a){
   if(a<=10)return["High risk","var(--tan)"];
   return["Very high risk","var(--rose)"];
 }
+function aqShow(v,station){
+  var lv=aqLevel(v);
+  $("aqi").textContent=(v>10?"10+":v);
+  $("aqic").textContent=lv[0];
+  $("aqst").textContent=station;
+  $("aqip").style.background=lv[1];
+}
+function aqNearest(features,getVal){
+  var best=null,bestD=1e9;
+  features.forEach(function(x){
+    var v=getVal(x.properties);
+    if(v==null||isNaN(v)) return;
+    var g=(x.geometry&&x.geometry.coordinates)||[LON,LAT];
+    var dx=(g[0]-LON)*Math.cos(LAT*Math.PI/180), dy=g[1]-LAT;
+    var dist=dx*dx+dy*dy;
+    if(dist<bestD){bestD=dist;best=x;}
+  });
+  return best;
+}
 function loadAir(){
-  var d=0.5;
-  var url="https://api.weather.gc.ca/collections/aqhi-observations-realtime/items?f=json&latest=true&limit=50"+
-  "&bbox="+(LON-d)+","+(LAT-d)+","+(LON+d)+","+(LAT+d);
-  fetch(url).then(function(r){return r.json()}).then(function(j){
-    var f=j.features||[], best=null, bestD=1e9;
-    f.forEach(function(x){
-      if(x.properties.aqhi==null) return;
-      var g=x.geometry.coordinates;
-      var dx=(g[0]-LON)*Math.cos(LAT*Math.PI/180), dy=g[1]-LAT;
-      var dist=dx*dx+dy*dy;
-      if(dist<bestD){bestD=dist;best=x;}
+  var d=0.75;
+  var box="&bbox="+(LON-d)+","+(LAT-d)+","+(LON+d)+","+(LAT+d);
+  var base="https://api.weather.gc.ca/collections/";
+  var obsF=[], fcF=[];
+  fetch(base+"aqhi-observations-realtime/items?f=json&latest=true&limit=100"+box)
+  .then(function(r){return r.json()})
+  .then(function(j){
+    obsF=j.features||[];
+    var best=aqNearest(obsF,function(p){return p.aqhi});
+    if(best){ aqShow(Math.round(best.properties.aqhi),best.properties.location_name_en); return null; }
+    return fetch(base+"aqhi-forecasts-realtime/items?f=json&limit=100"+box)
+    .then(function(r){return r.json()})
+    .then(function(k){
+      fcF=k.features||[];
+      var val=function(p){
+        if(p.aqhi!=null) return p.aqhi;
+        var fp=p.forecast_period&&p.forecast_period.period_1;
+        return fp?fp.aqhi:null;
+      };
+      var best2=aqNearest(fcF,val);
+      if(!best2){
+        $("aqi").textContent="--";
+        $("aqic").textContent="No data";
+        $("aqst").textContent="obs "+obsF.length+" / fc "+fcF.length;
+        return;
+      }
+      var name=best2.properties.location_name_en, mx=0;
+      fcF.forEach(function(x){
+        if(x.properties.location_name_en===name){
+          var v=val(x.properties); if(v!=null&&v>mx) mx=v;
+        }
+      });
+      aqShow(Math.round(mx),name+" (forecast)");
     });
-    if(!best){ $("aqic").textContent="No station nearby"; return; }
-    var v=Math.round(best.properties.aqhi), lv=aqLevel(v);
-    $("aqi").textContent=(v>10?"10+":v);
-    $("aqic").textContent=lv[0];
-    $("aqst").textContent=best.properties.location_name_en;
-    $("aqip").style.background=lv[1];
-  }).catch(function(){});
+  }).catch(function(){
+    $("aqic").textContent="Can't reach service";
+  });
 }
 
 /* ---- Radar (RainViewer) ---- */
