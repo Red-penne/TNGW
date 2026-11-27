@@ -70,6 +70,17 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 .day span{font-size:2.3vh;color:var(--sky)}
 .clock{color:var(--peach)}
 .basemap{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9) saturate(.6)}
+.top .title.hide{display:none}
+.alertbadge{display:none;background:var(--ac,#ffd23f);color:#000;font-weight:700;border-radius:3vh;padding:.3vh 2vw;align-self:flex-start;
+  line-height:5vh;font-size:4vh;white-space:nowrap;cursor:pointer}
+.alertbadge.on{display:block}
+.alertbadge.red{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+#alertpanel{display:none;position:fixed;left:19vw;right:2vw;top:12vh;bottom:3vh;z-index:4000;background:rgba(0,0,0,.96);
+  border-left:1.4vw solid var(--sky);border-radius:0 4vh 4vh 0;padding:2vh 2.5vw;overflow:auto}
+#alertpanel .aph{font-size:4.2vh;font-weight:700;margin-top:1vh}
+#alertpanel .apt{font-size:3vh;color:var(--peach);text-transform:none;white-space:pre-line;letter-spacing:.02em;margin:.6vh 0 2vh}
+#alertpanel .apclose{font-size:2.4vh;color:var(--sky);margin-top:1vh}
 #hint{position:fixed;left:50%;bottom:2vh;transform:translateX(-50%);z-index:5000;background:var(--orange);color:#000;
   font-size:2.6vh;padding:.8vh 2vw;border-radius:3vh;opacity:.92}
 </style>
@@ -80,7 +91,8 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
   <div class="top">
     <div class="info"><b id="loc">Châteauguay</b><span id="upd">Updated --:--</span></div>
     <div class="bar s"></div>
-    <div class="title">Environmental Systems</div>
+    <div class="title" id="ttl">Environmental Systems</div>
+    <div class="alertbadge" id="alertbadge"></div>
     <div class="bar"></div>
     <div class="info r"><b id="clock">--:--</b><span id="date">--</span></div>
     <div class="bar2"></div>
@@ -124,6 +136,7 @@ body{font-family:'Antonio','Arial Narrow','Impact',sans-serif;color:var(--orange
 </div>
 
 <div id="hint">Tap anywhere for full screen</div>
+<div id="alertpanel"><div id="aptext"></div><div class="apclose">Tap to close</div></div>
 <script>
 // ===== SETTINGS: change these to move the station =====
 var LAT = 45.3833, LON = -73.7500;   // Châteauguay
@@ -325,6 +338,61 @@ load(); setInterval(load,REFRESH_MIN*60000);
 loadAir(); setInterval(loadAir,REFRESH_MIN*60000);
 initMap(); loadRadar(); setInterval(loadRadar,REFRESH_MIN*60000);
 
+/* ---- Weather alerts (Environment Canada) ---- */
+var alerts=[], alertIdx=0, alertTimer=null, apTimer=null;
+var ALERT_RANK={red:3,orange:2,yellow:1};
+var ALERT_COLORS={red:"#ff4040",orange:"#ff9900",yellow:"#ffd23f"};
+function alertColor(c){ return ALERT_COLORS[(c||"").toLowerCase()]||"#aad6ff"; }
+function showAlert(){
+  var a=alerts[alertIdx], b=$("alertbadge");
+  b.textContent=a.name+(alerts.length>1?" ("+(alertIdx+1)+"/"+alerts.length+")":"");
+  b.style.setProperty("--ac",alertColor(a.colour));
+  b.className="alertbadge on"+(a.colour==="red"?" red":"");
+}
+function closeAlertPanel(){ $("alertpanel").style.display="none"; clearTimeout(apTimer); }
+function openAlertPanel(){
+  if(!alerts.length) return;
+  var box=$("aptext"); box.innerHTML="";
+  alerts.forEach(function(a){
+    var h=document.createElement("div"); h.className="aph"; h.textContent=a.name; h.style.color=alertColor(a.colour); box.appendChild(h);
+    var t=document.createElement("div"); t.className="apt"; t.textContent=a.text||"No further details."; box.appendChild(t);
+  });
+  $("alertpanel").style.display="block";
+  clearTimeout(apTimer); apTimer=setTimeout(closeAlertPanel,90000);
+}
+function setAlerts(list){
+  alerts=list; alertIdx=0; clearInterval(alertTimer);
+  var b=$("alertbadge"), t=$("ttl");
+  if(!alerts.length){ b.className="alertbadge"; t.className="title"; closeAlertPanel(); return; }
+  t.className="title hide";
+  showAlert();
+  if(alerts.length>1) alertTimer=setInterval(function(){ alertIdx=(alertIdx+1)%alerts.length; showAlert(); },6000);
+}
+function loadAlerts(){
+  var demo=null;
+  try{ demo=new URLSearchParams(location.search).get("alertdemo"); }catch(e){}
+  if(demo){   // preview: add ?alertdemo=red (or yellow / orange) to the page address
+    var col=(demo==="1")?"yellow":demo;
+    setAlerts([{name:col+" warning - snowfall",colour:col,text:"This is a sample alert, shown only because the page address ends in ?alertdemo.\nA real alert shows the full text from Environment Canada here."}]);
+    return;
+  }
+  var d=0.02;
+  var url="https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=20&bbox="+
+    (LON-d)+","+(LAT-d)+","+(LON+d)+","+(LAT+d);
+  fetch(url).then(function(r){ if(!r.ok) throw new Error("http"); return r.json(); }).then(function(j){
+    var out=[], seen={};
+    (j.features||[]).forEach(function(f){
+      var p=f.properties||{};
+      if(/\b(ended|cancel+ed)\b/i.test((p.alert_type||"")+" "+(p.status_en||""))) return;
+      var name=(p.alert_name_en||((p.alert_short_name_en||"Alert")+" "+(p.alert_type||""))).trim();
+      if(seen[name]) return; seen[name]=1;
+      out.push({name:name,colour:(p.risk_colour_en||"").toLowerCase(),text:p.alert_text_en||""});
+    });
+    out.sort(function(a,b){ return (ALERT_RANK[b.colour]||0)-(ALERT_RANK[a.colour]||0); });
+    setAlerts(out);
+  }).catch(function(){});
+}
+
 /* ---- Full screen + keep screen awake ---- */
 function isFull(){return document.fullscreenElement||document.webkitFullscreenElement}
 function keepAwake(){
@@ -344,6 +412,9 @@ function onFs(){
   $("hint").style.display=isFull()?"none":"block";
   if(map) setTimeout(function(){map.invalidateSize()},400);
 }
+$("alertbadge").addEventListener("click",function(e){ e.stopPropagation(); openAlertPanel(); });
+$("alertpanel").addEventListener("click",function(e){ e.stopPropagation(); closeAlertPanel(); });
+loadAlerts(); setInterval(loadAlerts,5*60000);
 document.addEventListener("click",goFull);
 document.addEventListener("fullscreenchange",onFs);
 document.addEventListener("webkitfullscreenchange",onFs);
